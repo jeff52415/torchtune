@@ -8,6 +8,7 @@ from unittest import mock
 
 from datasets import Dataset
 from tests.test_utils import DummyTokenizer
+from torchtune.data import InstructTemplate
 from torchtune.data._common import CROSS_ENTROPY_IGNORE_IDX
 from torchtune.datasets import InstructDataset
 
@@ -18,18 +19,16 @@ def dummy_transform(sample):
     return sample
 
 
-class DummyTemplate:
-    def __init__(self, template):
-        self.template = template
+class DummyTemplate(InstructTemplate):
+    template = "Instruction:\n{instruction}\n\nInput:\n{input}\n\nResponse: "
 
-    def format(self, sample, column_map):
-        return self.template.format(**sample)
+    @classmethod
+    def format(cls, sample, column_map):
+        return cls.template.format(**sample)
 
 
 class TestInstructDataset:
-    template = DummyTemplate(
-        "Instruction:\n{instruction}\n\nInput:\n{input}\n\nResponse: "
-    )
+    template = DummyTemplate
     expected_tokenized_prompts = [
         [
             0,
@@ -148,3 +147,21 @@ class TestInstructDataset:
             prompt, label = dataset[i]["tokens"], dataset[i]["labels"]
             assert prompt == self.expected_tokenized_prompts[i]
             assert label == expected_labels[i]
+
+    @mock.patch("torchtune.datasets._instruct.load_dataset")
+    def test_get_item_json_source(self, mock_load_dataset):
+        mock_load_dataset.return_value = Dataset.from_list(self.get_samples())
+        dataset = InstructDataset(
+            tokenizer=DummyTokenizer(),
+            source="dataset.json",
+            template=self.template,
+            transform=dummy_transform,
+            train_on_input=True,
+        )
+        assert len(dataset) == 2
+        mock_load_dataset.assert_called_once_with("json", data_files="dataset.json")
+
+        for i in range(len(dataset)):
+            prompt, label = dataset[i]["tokens"], dataset[i]["labels"]
+            assert prompt == self.expected_tokenized_prompts[i]
+            assert label == self.expected_tokenized_prompts[i]
